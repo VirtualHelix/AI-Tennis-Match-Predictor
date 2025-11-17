@@ -52,3 +52,77 @@ A structure that maintains player Elo states and updates them after each match u
   - Time-based cross-validation.
   - Calibration curves to evaluate probability reliability.
   - Comparison with baseline predictors (rank and Elo).
+
+## Repository Structure
+	•	data/
+		•	raw/ – Original ATP match data
+		•	processed/ – Cleaned, standardized datasets
+	•	src/
+		•	data_loader.py – Data ingestion and normalization
+		•	preprocess.py – Cleaning, formatting, missing-value handling
+		•	features.py – Feature engineering logic
+		•	elo.py – Elo rating + rating-tree engine
+	•	trees/
+		•	bst.py – Binary search tree implementation
+		•	avl.py – Balanced AVL tree
+		•	player_lookup.py – Hybrid hash-tree player index
+	•	model/
+		•	train.py – Model training pipeline
+		•	evaluate.py – Performance metrics and analysis
+		•	predict.py – Prediction interface
+	•	notebooks/
+		•	EDA.ipynb – Exploratory data analysis
+		•	Training.ipynb – Model development experiments
+		•	Predictions.ipynb – Predicting future matchups
+	•	README.md
+
+# Workflow 
+ATP match data is loaded from open datasets (Jeff Sackmann’s tennis_atp repository)
+
+# Data Cleaning
+- Normalize player names and unify formats.
+- Remove irrelevant or malformed entries.
+- Encode categorical variables such as surface, round, and tournament category.
+
+# Tree Construction 
+- Player histories inserted into binary search trees.
+- Surface-specific statistics stored in separate trees.
+- Rating histories handled by a balanced Elo tree.
+- All structures support incremental updates for future integration with live data.
+
+# Feature Engineering
+The system generates a comprehensive feature vector for each match, including:
+- Recent-match summaries computed via tree lookups.
+- Surface performance extracted from surface-specific BSTs.
+- Head-to-head data retrieved via hybrid lookup layer.
+- Elo ratings accessed from the rating tree.
+
+# Model Training 
+Models are trained on chronological splits to avoid leakage. Hyperparameters can be tuned via grid search or Bayesian optimization.
+
+# Math Prediction
+from src.model.predict import predict_match
+predict_match("Novak Djokovic", "Carlos Alcaraz", surface="Hard")
+Example output:
+{'Djokovic_win_probability': 0.61}
+
+# Requirements 
+	•	Python 3.9+
+	•	pandas
+	•	numpy
+	•	scikit-learn
+	•	xgboost or lightgbm (optional)
+	•	jupyter
+	•	matplotlib / seaborn for visualization (optional)
+
+# Future Extensions 
+- Add injury and fatigue modeling.
+- Incorporate travel-distance and time-zone fatigue calculations.
+- Add player clustering using unsupervised learning.
+- Deploy the model as an API or web application
+- Integrate bookmaker odds to identify betting value.
+- Extend tree structures for sequence pattern analysis.
+
+# License
+This project is released under the MIT License.
+
