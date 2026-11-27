@@ -1,2 +1,131 @@
-# Fully pinned Python 3.12 web and evaluated-model dependencies.
--r requirements/production.txt
+annotated-doc==0.0.7
+    # via fastapi
+annotated-types==0.8.0
+    # via pydantic
+anyio==4.16.0
+    # via
+    #   httpx2
+    #   starlette
+    #   vercel-blob
+    #   vercel-internal-core
+    #   vercel-oidc
+catboost==1.2.10
+    # via -r requirements/model.txt
+click==8.5.1
+    # via uvicorn
+contourpy==1.4.0
+    # via matplotlib
+cycler==0.12.1
+    # via matplotlib
+fastapi==0.141.1
+    # via -r requirements/runtime.txt
+fonttools==4.69.1
+    # via matplotlib
+graphviz==0.21
+    # via catboost
+h11==0.16.0
+    # via
+    #   httpcore2
+    #   uvicorn
+httpcore2==2.16.2
+    # via httpx2
+httpx2==2.16.2
+    # via
+    #   vercel-blob
+    #   vercel-internal-core
+    #   vercel-oidc
+idna==3.20
+    # via
+    #   anyio
+    #   httpx2
+joblib==1.5.3
+    # via
+    #   -r requirements/model.txt
+    #   scikit-learn
+kiwisolver==1.5.1
+    # via matplotlib
+matplotlib==3.11.2
+    # via catboost
+narwhals==2.29.0
+    # via plotly
+numpy==2.0.2
+    # via
+    #   -r requirements/model.txt
+    #   catboost
+    #   contourpy
+    #   matplotlib
+    #   pandas
+    #   scikit-learn
+    #   scipy
+packaging==26.4
+    # via
+    #   matplotlib
+    #   plotly
+pandas==2.3.3
+    # via
+    #   -r requirements/model.txt
+    #   catboost
+pillow==13.0.0
+    # via matplotlib
+plotly==7.2.0
+    # via catboost
+pydantic==2.14.4
+    # via
+    #   fastapi
+    #   vercel-blob
+pydantic-core==2.50.5
+    # via pydantic
+pyparsing==3.3.3
+    # via matplotlib
+python-dateutil==4.0.0
+    # via
+    #   matplotlib
+    #   pandas
+pytz==2026.6
+    # via pandas
+scikit-learn==1.6.1
+    # via -r requirements/model.txt
+scipy==1.13.1
+    # via
+    #   -r requirements/model.txt
+    #   catboost
+    #   scikit-learn
+six==1.17.0
+    # via catboost
+starlette==1.10.0
+    # via fastapi
+threadpoolctl==3.7.0
+    # via
+    #   -r requirements/model.txt
+    #   scikit-learn
+truststore==0.10.5
+    # via
+    #   httpcore2
+    #   httpx2
+typing-extensions==4.16.0
+    # via
+    #   anyio
+    #   fastapi
+    #   httpx2
+    #   pydantic
+    #   pydantic-core
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.5
+    # via
+    #   fastapi
+    #   pydantic
+tzdata==2026.6
+    # via
+    #   pandas
+    #   python-dateutil
+uvicorn==0.52.1
+    # via -r requirements/runtime.txt
+vercel-blob==0.6.2
+    # via -r requirements/runtime.txt
+vercel-headers==0.8.0
+    # via vercel-oidc
+vercel-internal-core==0.3.2
+    # via vercel-blob
+vercel-oidc==0.12.0
+    # via vercel-blob
