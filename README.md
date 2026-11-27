@@ -1,128 +1,88 @@
-# AI-Tennis-Match-Predictor
-This project develops a predictive system for ATP tennis match outcomes using all available match data from 1968 to the present. It combines machine learning techniques with custom data structures, including binary search trees and balanced trees, to efficiently store and retrieve large historical datasets. The goal is to create a scalable and accurate model that produces pre-match win probabilities for any given player matchup.
+# CourtIQ
 
-# Overview
-Professional tennis produces decades of structured match data containing player statistics, ranking information, surfaces, tournament levels, and contextual features. This project leverages those historical records to train algorithms capable of estimating the probability that Player A defeats Player B under specific conditions. In addition to standard machine-learning workflows, the project incorporates data-structure-based optimizations. Binary trees, AVL trees, and hybrid hash-tree lookup systems allow fast, logarithmic-time retrieval of player histories, surface statistics, head-to-head records, and Elo-ratings snapshots. These structures significantly improve feature computation and reduce the runtime of repeated model queries.
+**Tennis match predictions, with the evidence behind every estimate.**
 
-# Key Features
-- Historical Dataset (1995–Present)
-  - Ingests and processes ATP match results across all tournament levels.
-  - Includes match metadata such as date, surface, round, ranking, scorelines, and tournament category.
-- Data Processing and Cleaning
-  - Standardizes player names across decades.
-  - Removes or flags walkovers, retirements, and incomplete matches.
-  - Handles missing values and inconsistent records.
-- Feature Engineering
-  - Player form metrics (overall and surface-specific).
-  - Rolling win percentages.
-  - Ranking and age differences.
-  - Head-to-head statistics.
-  - Surface-adjusted Elo ratings.
-  - Tournament difficulty indicators.
-  - Contextual match features (best-of-3 vs best-of-5, round, tournament prestige).
+CourtIQ turns a tennis research model into an interactive web application. Choose two players and a hard, clay, or grass court to explore their estimated win probabilities, historical strengths, head-to-head record, and recent results. Built by Raghav, the project connects chronological machine learning, a Python API, a responsive interface, and a results pipeline with durable state.
 
-# Data Structures
+The released artifact supports **1,537 players** and contains model history through **May 25, 2026**. Updated match results arrive separately through SportStatsAPI. The interface identifies both dates: refreshing displayed results does **not** retrain the predictor or update its feature history.
 
-The project includes several custom implementations to improve data retrieval:
-- Binary Search Trees (BSTs):
-  Used for storing chronologically ordered player performance metrics, enabling rapid lookup of recent matches and form calculations.
-- AVL / Balanced Trees: 
-Used for maintaining sorted match histories across large datasets, ensuring O(log n) updates and retrieval.
-- Hybrid Hash-Tree Player Index:
-Combines hashing for quick name resolution with a tree-structured history for ordered statistics.
+![CourtIQ Match Lab with two selected players and the clay court theme](docs/screenshots/match-lab.jpg)
 
-# Elo Rating Tree
-A structure that maintains player Elo states and updates them after each match using a logarithmic access pattern.
-- These systems support fast computation during:
-   - Feature generation
-   - Training runs
-	 - Real-time prediction calls
+[View the results screen](docs/screenshots/match-results.jpg)
 
-# Machine Learning Models
-- The modeling pipeline supports multiple algorithms:
-  - Logistic regression baseline
-  - Random Forest classifier
-  - Gradient Boosting (XGBoost, LightGBM, or CatBoost)
-  - Custom tree-based predictor that integrates your binary-tree data structures
-  - Optional neural network extensions
+## Explore a matchup
 
-# All models are trained chronologically to avoid future-data leakage (e.g., train 1995–2018, validate 2019–2021, test 2022–present).
-- Evaluation Tools
-  - Accuracy, log loss, and AUC.
-  - Time-based cross-validation.
-  - Calibration curves to evaluate probability reliability.
-  - Comparison with baseline predictors (rank and Elo).
+- **Match Lab:** player search, portraits, court-specific themes, dark mode, and a separate animated results screen. The calculation sequence follows actual server milestones and respects reduced-motion preferences.
+- **Match outlook:** complementary win probabilities, year-to-date and overall recorded head-to-head, the last three meetings, and each player's three latest matches. Surface badges and individual set scoreboards make the record readable; unavailable set scores stay explicitly unavailable.
+- **Player Compare:** historical serving, returning, first- and second-serve performance, aces, double faults, and break-point rates, alongside the amount of supporting history.
+- **Model Report:** historical evaluation, an Elo comparison, calibration data, feature groups, and interactive explanations of the saved model's equations.
 
-## Repository Structure
-	•	data/
-		•	raw/ – Original ATP match data
-		•	processed/ – Cleaned, standardized datasets
-	•	src/
-		•	data_loader.py – Data ingestion and normalization
-		•	preprocess.py – Cleaning, formatting, missing-value handling
-		•	features.py – Feature engineering logic
-		•	elo.py – Elo rating + rating-tree engine
-	•	trees/
-		•	bst.py – Binary search tree implementation
-		•	avl.py – Balanced AVL tree
-		•	player_lookup.py – Hybrid hash-tree player index
-	•	model/
-		•	train.py – Model training pipeline
-		•	evaluate.py – Performance metrics and analysis
-		•	predict.py – Prediction interface
-	•	notebooks/
-		•	EDA.ipynb – Exploratory data analysis
-		•	Training.ipynb – Model development experiments
-		•	Predictions.ipynb – Predicting future matchups
-	•	README.md
+## Model and evidence
 
-# Workflow 
-ATP match data is loaded from open datasets (Jeff Sackmann’s tennis_atp repository)
+The predictor combines **logistic regression with interactions** and **CatBoost**, using 178 input features: overall and surface Elo, time-weighted serving and returning, common-opponent comparisons, and recent performance relative to prior expectations. Training examples begin in 2010; older records initialize history. A five-year half-life reduces older examples' training weight.
 
-# Data Cleaning
-- Normalize player names and unify formats.
-- Remove irrelevant or malformed entries.
-- Encode categorical variables such as surface, round, and tournament category.
+The mixture was selected using 2024: **75% logistic regression and 25% CatBoost**. Both player orientations are evaluated so swapping players complements the probability. Training and serving share [courtiq/model.py](courtiq/model.py); its source hash is checked against the saved artifact.
 
-# Tree Construction 
-- Player histories inserted into binary search trees.
-- Surface-specific statistics stored in separate trees.
-- Rating histories handled by a balanced Elo tree.
-- All structures support incremental updates for future integration with live data.
+### 2025 historical evaluation
 
-# Feature Engineering
-The system generates a comprehensive feature vector for each match, including:
-- Recent-match summaries computed via tree lookups.
-- Surface performance extracted from surface-specific BSTs.
-- Head-to-head data retrieved via hybrid lookup layer.
-- Elo ratings accessed from the rating tree.
+These figures come from the evaluated model's saved report, exposed by `/api/evaluation` and the Model Report screen.
 
-# Model Training 
-Models are trained on chronological splits to avoid leakage. Hyperparameters can be tuned via grid search or Bayesian optimization.
+| Metric | CourtIQ | Elo baseline |
+| --- | ---: | ---: |
+| Correct predictions | 1,507 / 2,275 | 1,453 / 2,275 |
+| Winner accuracy | **66.24%** | 63.87% |
+| ROC AUC | 0.71965 | 0.70494 |
+| Log loss ↓ | 0.61231 | 0.63040 |
+| Brier score ↓ | 0.21268 | 0.22025 |
 
-# Math Prediction
-from src.model.predict import predict_match
-predict_match("Novak Djokovic", "Carlos Alcaraz", surface="Hard")
-Example output:
-{'Djokovic_win_probability': 0.61}
+That is 54 additional correct predictions and a **2.37 percentage-point** difference. It is a descriptive historical comparison, not a significance test or future-accuracy claim. The season has already informed development. The calibration plot assesses reliability; no separate probability calibrator is fitted.
 
-# Requirements 
-	•	Python 3.9+
-	•	pandas
-	•	numpy
-	•	scikit-learn
-	•	xgboost or lightgbm (optional)
-	•	jupyter
-	•	matplotlib / seaborn for visualization (optional)
+ATP records use tournament-start dates. A **21-day availability proxy** determines when results enter feature history, approximating publication timing. Shot-charting features are disabled in this artifact. The website uses a generic best-of-three ATP context with an unspecified round; evaluation used recorded match context.
 
-# Future Extensions 
-- Add injury and fatigue modeling.
-- Incorporate travel-distance and time-zone fatigue calculations.
-- Add player clustering using unsupervised learning.
-- Deploy the model as an API or web application
-- Integrate bookmaker odds to identify betting value.
-- Extend tree structures for sequence pattern analysis.
+## Engineering
 
-# License
-This project is released under the MIT License.
+The shared prediction service powers the local launcher and FastAPI deployment. Streamed NDJSON events drive calculation progress. The API bounds request sizes and inference concurrency, checks application origins, and exposes model readiness through `/healthz`.
 
+A build verifies private artifact hashes, frozen source, and dependency versions before creating a compact serving bundle. A 73-case comparison found identical complete prediction payloads before and after compaction; fitted weights and full descriptive match history are preserved.
+
+Hosted results use a scheduled job and a private Blob object holding pagination checkpoints, request reservations, a lease, and a published snapshot. Conditional writes prevent overlapping workers from overwriting newer state. Visitors read that snapshot rather than spending a tennis-provider request per page load.
+
+## Run locally
+
+Use **Python 3.12**:
+
+```bash
+git clone https://github.com/VirtualHelix/AI-Tennis-Match-Predictor.git
+cd AI-Tennis-Match-Predictor
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+Supply the owner's verified model at `models/courtiq/model.joblib`, with its `validation_predictions.csv` alongside for calibration. The model, private export, credentials, and generated serving bundle are excluded from Git; a fresh clone does not include a trained predictor. Existing installations can use the `models/research_v5/model.joblib` fallback.
+
+```bash
+python -m uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+Open `http://127.0.0.1:8000`. The local launcher also remains available as `python run_courtiq.py --port 8001`. Set `SPORTSTATS_KEY` in the process environment for local results updates; `.env` files are not loaded automatically. Without a key, saved historical records remain available.
+
+## Source and verification
+
+| Location | Responsibility |
+| --- | --- |
+| `courtiq/model.py` | Frozen research training, features, and prediction |
+| `courtiq/server.py`, `courtiq/api.py` | Shared service and HTTP routes |
+| `courtiq/static/`, `courtiq/assets/` | Interface, photographs, credits, and facts |
+| `courtiq/sportstats.py`, `courtiq/history.py` | Results normalization and history reconciliation |
+| `courtiq/results_job.py`, `courtiq/hosted_results.py` | Durable refresh job and snapshot reader |
+| `scripts/`, `deployment/`, `tests/` | Export, verified builds, release manifest, and software tests |
+
+```bash
+python -m pip install -r requirements/dev.txt
+python -m unittest discover -s tests -v
+```
+
+[GitHub Actions](.github/workflows/tests.yml) runs the Python 3.12 suite. Synthetic fixtures test software behavior and are never displayed as tennis evidence. Original `src/` experiments remain; the web app uses `courtiq/`.
+
+See the [deployment guide](docs/deployment.md) for Vercel, private artifacts, scheduled updates, and operating limits. Historical data comes from [Jeff Sackmann's ATP dataset](https://github.com/JeffSackmann/tennis_atp) and its [update fork](https://github.com/Kadantte/tennis_atp); updated records use [SportStatsAPI](https://sportstatsapi.com/docs/api/tennis-matches/). [Photo attributions](courtiq/assets/players/attribution.json) preserve authors and licenses. [Tennis facts](courtiq/assets/tennis_facts.json) retain source links.

@@ -161,13 +161,19 @@ class BlobStateStore:
         """Return (document, ETag), or (None, None) only for a missing object."""
         httpx, session, blob = self._sdk()
         try:
-            with session(httpx_client_factory=lambda: httpx.Client(timeout=self.timeout)):
+            # Compressed delivery responses can expose a weak ETag (W/...),
+            # which cannot satisfy the storage API's strong If-Match check.
+            # Read the identity representation so its ETag versions these bytes.
+            with session(httpx_client_factory=lambda: httpx.Client(
+                    timeout=self.timeout, headers={"accept-encoding": "identity"})):
                 with blob.stream_blob(self.read_url, access="private") as stream:
                     if stream.metadata.size is not None and stream.metadata.size > MAX_STATE_BYTES:
                         raise StateUnavailable("Results state exceeds the storage size limit.")
                     etag = stream.metadata.etag
                     if not isinstance(etag, str) or not etag:
                         raise StateUnavailable("Results storage omitted its version.")
+                    if etag.startswith("W/"):
+                        raise StateUnavailable("Results storage did not provide a strong version.")
                     chunks, length = [], 0
                     read_deadline = time.monotonic() + self.timeout
                     for chunk in stream:
@@ -197,7 +203,8 @@ class BlobStateStore:
         headers = {}
         if expected_etag is not None:
             if (not isinstance(expected_etag, str) or not expected_etag
-                    or len(expected_etag) > 512 or any(ord(c) < 32 for c in expected_etag)):
+                    or expected_etag.startswith("W/") or len(expected_etag) > 512
+                    or any(ord(c) < 32 for c in expected_etag)):
                 raise StateUnavailable("Invalid expected state version.")
             headers["x-if-match"] = expected_etag
         try:

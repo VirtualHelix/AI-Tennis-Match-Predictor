@@ -282,7 +282,7 @@ class ResultsJobTests(unittest.TestCase):
 
 
 class BlobProtocolTests(unittest.TestCase):
-    def fake_sdk(self, put_error=None, read_payload=b"{}", read_error=None):
+    def fake_sdk(self, put_error=None, read_payload=b"{}", read_error=None, read_etag='"read"'):
         seen = {"clients": [], "puts": [], "reads": []}
 
         class FakeHTTPX:
@@ -312,7 +312,7 @@ class BlobProtocolTests(unittest.TestCase):
                     raise read_error
 
                 class Stream:
-                    metadata = SimpleNamespace(etag='"read"', size=len(read_payload))
+                    metadata = SimpleNamespace(etag=read_etag, size=len(read_payload))
 
                     def __iter__(self):
                         yield read_payload
@@ -358,6 +358,20 @@ class BlobProtocolTests(unittest.TestCase):
         self.assertEqual(etag, '"read"')
         self.assertEqual(seen["reads"][0][0][0], PRIVATE_URL + "?cache=0")
         self.assertEqual(seen["reads"][0][1], {"access": "private"})
+        self.assertEqual(seen["clients"][0]["headers"], {"accept-encoding": "identity"})
+
+    def test_weak_delivery_version_is_rejected_without_blind_conversion(self):
+        sdk, _ = self.fake_sdk(read_etag='W/"compressed-representation"')
+        with patch.object(job.BlobStateStore, "_sdk", return_value=sdk):
+            with self.assertRaises(job.StateUnavailable):
+                job.BlobStateStore(PRIVATE_URL).read()
+
+    def test_weak_expected_version_never_reaches_the_write_endpoint(self):
+        sdk, seen = self.fake_sdk()
+        with patch.object(job.BlobStateStore, "_sdk", return_value=sdk):
+            with self.assertRaises(job.StateUnavailable):
+                job.BlobStateStore(PRIVATE_URL).compare_and_set('W/"weak"', {})
+        self.assertEqual(seen["puts"], [])
 
     def test_missing_object_is_distinct_from_failed_storage(self):
         error = RuntimeError("not found")
