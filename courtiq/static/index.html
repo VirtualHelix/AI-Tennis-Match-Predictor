@@ -295,12 +295,12 @@ html[data-theme=light] .court-badge[data-surface=grass]{background:#edf6e8;borde
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
     try {
       const response = await fetch(path, {method: options.method || 'GET', cache: 'no-store', signal: controller.signal, headers: {'Accept': 'application/json', ...(options.body ? {'Content-Type': 'application/json'} : {})}, ...(options.body ? {body: options.body} : {})});
-      let data; try { data = await response.json(); } catch (_) { throw new Error('The local results service is unavailable. Open CourtIQ through the Python server.'); }
+      let data; try { data = await response.json(); } catch (_) { throw new Error(resultsFeed.status.read_only ? 'Published match results are temporarily unavailable. Please try again shortly.' : 'The local results service is unavailable. Open CourtIQ through the Python server.'); }
       if (!response.ok) throw new Error(data && data.error && (typeof data.error === 'string' ? data.error : data.error.message) || `The results request could not finish (${response.status}).`);
       return data;
     } catch (error) {
-      if (timedOut) throw new Error('The local results service did not respond in time. Please try again.');
-      if (error instanceof TypeError) throw new Error('Cannot reach the local results service. Check that the Python server is running.');
+      if (timedOut) throw new Error(resultsFeed.status.read_only ? 'Published match results did not load in time. Please try again.' : 'The local results service did not respond in time. Please try again.');
+      if (error instanceof TypeError) throw new Error(resultsFeed.status.read_only ? 'Cannot load published match results. Please check your connection and try again.' : 'Cannot reach the local results service. Check that the Python server is running.');
       throw error;
     } finally {
       clearTimeout(timer); if (outerSignal) outerSignal.removeEventListener('abort', onAbort);
@@ -331,7 +331,7 @@ html[data-theme=light] .court-badge[data-surface=grass]{background:#edf6e8;borde
     return null;
   }
   function renderResultsStatus() {
-    const status = resultsFeed.status, configured = status.configured === true, syncing = status.state === 'syncing';
+    const status = resultsFeed.status, configured = status.configured === true, syncing = status.state === 'syncing', readOnly = status.read_only === true;
     let summary = 'Updated results: not connected';
     if (configured) {
       const labels = {syncing: 'syncing', ready: status.coverage_complete === false ? 'partial coverage' : 'ready', paused: 'paused', error: 'needs attention', disabled: 'not connected'};
@@ -341,12 +341,12 @@ html[data-theme=light] .court-badge[data-surface=grass]{background:#edf6e8;borde
     const coolingDown = feedRefreshAvailableAt() > Date.now();
     $('results-sync').disabled = !configured || syncing || resultsFeed.syncRequest || coolingDown;
     $('results-sync').title = coolingDown ? `Refresh available ${syncTimeLabel(feedRefreshAvailableAt())}` : '';
-    $('results-sync-label').textContent = resultsFeed.syncRequest ? 'Starting…' : syncing ? 'Refreshing…' : 'Refresh results';
-    $('feed-explanation').textContent = !configured ? 'Set SPORTSTATS_KEY on the local Python server, then restart it. The key stays on that server.' : typeof status.message === 'string' && status.message ? status.message : syncing ? 'Fetching completed results in the background. You can keep using the model while the cache fills.' : status.state === 'paused' ? 'The results sync is paused. Refresh results to resume when the provider is available.' : 'Updated results are cached locally and added to the displayed match records.';
+    $('results-sync-label').textContent = readOnly ? resultsFeed.syncRequest ? 'Loading…' : typeof status.refresh_label === 'string' && status.refresh_label ? status.refresh_label : 'Reload latest results' : resultsFeed.syncRequest ? 'Starting…' : syncing ? 'Refreshing…' : 'Refresh results';
+    $('feed-explanation').textContent = readOnly ? typeof status.message === 'string' && status.message ? status.message : configured ? 'Match results are published periodically. Reload checks for the latest published records.' : 'Updated match results are not configured for this deployment.' : !configured ? 'Set SPORTSTATS_KEY on the local Python server, then restart it. The key stays on that server.' : typeof status.message === 'string' && status.message ? status.message : syncing ? 'Fetching completed results in the background. You can keep using the model while the cache fills.' : status.state === 'paused' ? 'The results sync is paused. Refresh results to resume when the provider is available.' : 'Updated results are cached locally and added to the displayed match records.';
     const metadata = $('feed-metadata'); metadata.replaceChildren();
     if (configured) {
-      feedMetadata('Last sync', syncTimeLabel(status.last_sync));
-      if (finite(status.matches)) feedMetadata('Cached match records', number(status.matches));
+      feedMetadata(readOnly ? 'Last provider update' : 'Last sync', syncTimeLabel(status.last_sync));
+      if (finite(status.matches)) feedMetadata(readOnly ? 'Published match records' : 'Cached match records', number(status.matches));
       if (status.coverage_start || status.coverage_end) feedMetadata('Reported coverage', `${dateLabel(status.coverage_start)} – ${dateLabel(status.coverage_end)}`);
       if (typeof status.coverage_complete === 'boolean') feedMetadata('Coverage status', status.coverage_complete ? 'Requested window complete' : 'Partial; gaps may remain');
       if (Array.isArray(status.covered_ranges) && status.covered_ranges.length > 1) {
@@ -356,11 +356,11 @@ html[data-theme=light] .court-badge[data-surface=grass]{background:#edf6e8;borde
       if (finite(status.requests_today)) feedMetadata('Provider requests today', number(status.requests_today));
       if (finite(status.delay_seconds) && status.delay_seconds > 0) feedMetadata('Provider data delay', status.delay_seconds >= 60 ? `About ${Math.ceil(status.delay_seconds / 60)} minutes` : `About ${Math.ceil(status.delay_seconds)} seconds`);
       if (resultsFeed.retryAt > Date.now()) feedMetadata('Retry available', syncTimeLabel(resultsFeed.retryAt));
-      if (resultsFeed.manualRefreshAt > Date.now()) feedMetadata('Next manual refresh', syncTimeLabel(resultsFeed.manualRefreshAt));
+      if (resultsFeed.manualRefreshAt > Date.now()) feedMetadata(readOnly ? 'Next reload' : 'Next manual refresh', syncTimeLabel(resultsFeed.manualRefreshAt));
     }
     message('feed-error', configured ? resultsFeed.localError || (typeof status.error === 'string' ? status.error : '') : '');
     $('feed-attribution').hidden = !configured;
-    const showProgress = configured && (syncing || status.state === 'paused'); $('feed-progress').hidden = !showProgress;
+    const showProgress = !readOnly && configured && (syncing || status.state === 'paused'); $('feed-progress').hidden = !showProgress;
     if (showProgress) {
       const progress = finite(status.progress) ? Math.max(0, Math.min(100, status.progress)) : 0;
       $('feed-progress-percent').textContent = finite(status.progress) ? `${Math.round(progress)}%` : '';
@@ -392,15 +392,16 @@ html[data-theme=light] .court-badge[data-surface=grass]{background:#edf6e8;borde
   async function refreshDisplayedResults() {
     resultsFeed.pendingHistoryRefresh = true;
     if (document.hidden || state.predicting || resultsFeed.historyBusy) return;
+    const readOnly = resultsFeed.status.read_only === true;
     if (!state.prediction || !resultsFeed.lastRequest || !resultsFeed.lastPair) {
       resultsFeed.pendingHistoryRefresh = false;
-      message('feed-update-note', state.prediction ? 'Results updated. Analyze again to refresh these match records.' : 'Results updated. Analyze a matchup to see the refreshed records.');
+      message('feed-update-note', readOnly ? state.prediction ? 'Published results loaded. Analyze again to update these match records.' : 'Published results loaded. Analyze a matchup to see the latest records.' : state.prediction ? 'Results updated. Analyze again to refresh these match records.' : 'Results updated. Analyze a matchup to see the refreshed records.');
       return;
     }
     const prediction = state.prediction, version = state.predictionVersion, requestId = ++resultsFeed.historyRequestId;
     const request = {...resultsFeed.lastRequest}, pair = resultsFeed.lastPair.map(player => ({...player}));
     const controller = new AbortController(); resultsFeed.historyController = controller; resultsFeed.historyBusy = true; resultsFeed.pendingHistoryRefresh = false;
-    message('feed-update-note', 'Results synced. Updating the displayed match records…');
+    message('feed-update-note', readOnly ? 'Published results loaded. Updating the displayed match records…' : 'Results synced. Updating the displayed match records…');
     try {
       const updated = await resultsJSON('/api/predict', {method: 'POST', body: JSON.stringify(request), signal: controller.signal});
       if (requestId !== resultsFeed.historyRequestId || state.prediction !== prediction || state.predictionVersion !== version) return;
@@ -410,10 +411,10 @@ html[data-theme=light] .court-badge[data-surface=grass]{background:#edf6e8;borde
       if (recent) { prediction.recent_matches = recent; renderRecentMatches(recent, pair); }
       renderResultFreshness(prediction);
       message('result-history-update', 'Match records refreshed. Model probability unchanged.');
-      message('feed-update-note', 'Displayed match records refreshed. The prediction model is unchanged.');
+      message('feed-update-note', readOnly ? 'Latest published match records loaded. The prediction model is unchanged.' : 'Displayed match records refreshed. The prediction model is unchanged.');
     } catch (error) {
       if (error.name !== 'AbortError' && requestId === resultsFeed.historyRequestId && state.prediction === prediction) {
-        message('feed-update-note', 'Results updated. Analyze again to refresh these match records.');
+        message('feed-update-note', readOnly ? 'Published results loaded. Analyze again to update these match records.' : 'Results updated. Analyze again to refresh these match records.');
         message('result-history-update', 'The displayed records have not refreshed yet. Analyze again to update them.');
       }
     } finally {
@@ -424,16 +425,17 @@ html[data-theme=light] .court-badge[data-surface=grass]{background:#edf6e8;borde
     }
   }
   function handleResultsCompletion(status) {
-    const identity = `${status.last_sync || ''}|${status.matches || 0}|${status.coverage_end || ''}`;
+    const identity = `${status.last_sync || ''}|${status.matches || 0}|${status.coverage_end || ''}${status.read_only ? `|${status.snapshot_published_at || ''}|${status.revision || 0}` : ''}`;
     if (identity === resultsFeed.lastHandledSync) return;
     resultsFeed.lastHandledSync = identity;
     refreshDisplayedResults();
   }
   function acceptResultsStatus(payload, forceCompletion = false) {
     const status = payload && payload.status && payload.status.state ? payload.status : payload;
-    if (!status || typeof status.configured !== 'boolean' || !['disabled', 'syncing', 'ready', 'paused', 'error'].includes(status.state)) throw new Error('The local results service returned an unreadable status.');
+    if (!status || typeof status.configured !== 'boolean' || !['disabled', 'syncing', 'ready', 'paused', 'error'].includes(status.state)) throw new Error(resultsFeed.status.read_only ? 'Published match results returned an unreadable status.' : 'The local results service returned an unreadable status.');
     const newlySynced = resultsFeed.available && status.last_sync && status.last_sync !== resultsFeed.status.last_sync;
-    const completed = status.state === 'ready' && (resultsFeed.syncWasActive || forceCompletion || newlySynced);
+    const newlyPublished = resultsFeed.available && status.read_only && status.snapshot_published_at && (status.snapshot_published_at !== resultsFeed.status.snapshot_published_at || status.revision !== resultsFeed.status.revision);
+    const completed = status.state === 'ready' && (resultsFeed.syncWasActive || forceCompletion || newlySynced || newlyPublished);
     resultsFeed.status = status; resultsFeed.available = true; resultsFeed.localError = '';
     const receivedAt = Date.now();
     resultsFeed.manualRefreshAt = finite(status.manual_refresh_in_seconds) && status.manual_refresh_in_seconds > 0 ? receivedAt + status.manual_refresh_in_seconds * 1000 : 0;
@@ -455,7 +457,7 @@ html[data-theme=light] .court-badge[data-surface=grass]{background:#edf6e8;borde
     } catch (error) {
       if (error.name !== 'AbortError' && requestId === resultsFeed.statusRequestId) {
         if (resultsFeed.available) resultsFeed.localError = error.message;
-        else resultsFeed.status = {configured: false, state: 'disabled'};
+        else resultsFeed.status = {configured: false, state: 'disabled', read_only: resultsFeed.status.read_only === true};
         renderResultsStatus();
       }
     } finally {

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "fastapi",
+  "buildCommand": "python scripts/build_vercel.py",
+  "functions": {
+    "app.py": {
+      "maxDuration": 300,
+      "includeFiles": "models/courtiq/**",
+      "excludeFiles": "{data/**,src/**,tests/**,experiments/**,docs/**,model_verification/**,.git/**,models/courtiq/model.joblib}"
+    }
+  },
+  "schedules": {
+    "refresh-results": {
+      "schedule": "17 */6 * * *",
+      "path": "/api/internal/refresh-results",
+      "requestMethod": "POST"
+    }
+  }
+}

@@ -2,8 +2,10 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import os
 import threading
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -89,6 +91,179 @@ def application(service=None, **changes):
             "public_origin": ORIGIN}
     args.update(changes)
     return adapter.create_app(**args), service
+
+
+class SnapshotFeed(Feed):
+    def __init__(self):
+        super().__init__()
+        self.revision = 1
+        self.published_revision = 1
+        self.events = []
+
+    def refresh(self):
+        super().refresh()
+        self.revision = self.published_revision
+        self.events.append(("refresh", self.revision))
+        return {"state": "ready", "revision": self.revision}
+
+
+class SnapshotService(Service):
+    """A service cache must see the newly published revision before lookup."""
+    def __init__(self):
+        super().__init__(configured=True)
+        self.results_feed = SnapshotFeed()
+        self.cached_revision = None
+
+    def results_status(self):
+        return {"configured": True, "state": "ready", "read_only": True,
+                "revision": self.results_feed.revision}
+
+    def predict(self, payload, progress=None):
+        revision = self.results_feed.revision
+        self.results_feed.events.append(("predict", revision))
+        result = super().predict(payload, progress)
+        result.update(revision=revision, cached=revision == self.cached_revision)
+        self.cached_revision = revision
+        return result
+
+    def compare(self, payload):
+        self.results_feed.events.append(("compare", self.results_feed.revision))
+        return {"comparison": payload, "revision": self.results_feed.revision}
+
+
+class HostingTests(unittest.TestCase):
+    JOB_PATH = "/api/internal/refresh-results"
+
+    def test_scheduled_job_requires_a_configured_exact_bearer_secret(self):
+        calls = []
+        with patch.dict(os.environ, {"CRON_SECRET": "test-secret", "COURTIQ_ENABLE_RESULTS_JOB": "1"}, clear=True):
+            app, _ = application(results_job=lambda: calls.append(True))
+            with TestClient(app, base_url=ORIGIN) as client:
+                for headers in ({}, {"Authorization": "Bearer wrong"},
+                                {"Authorization": "Basic test-secret"},
+                                {"Authorization": "Bearer test-secret extra"}):
+                    response = client.post(self.JOB_PATH, headers=headers)
+                    self.assertEqual(response.status_code, 401)
+                    self.assertEqual(response.json()["error"]["code"], "unauthorized")
+                with patch.dict(os.environ, {"CRON_SECRET": ""}):
+                    self.assertEqual(client.post(self.JOB_PATH, headers={"Authorization": "Bearer "}).status_code, 401)
+        self.assertEqual(calls, [])
+
+    def test_scheduled_job_rejects_non_ascii_authorization_as_unauthorized(self):
+        calls = []
+        with patch.dict(os.environ, {"CRON_SECRET": "test-secret", "COURTIQ_ENABLE_RESULTS_JOB": "1"}, clear=True):
+            app, _ = application(results_job=lambda: calls.append(True))
+            with TestClient(app, base_url=ORIGIN, raise_server_exceptions=False) as client:
+                response = client.post(self.JOB_PATH, headers=[(b"authorization", b"Bearer \xff")])
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.json()["error"]["code"], "unauthorized")
+        self.assertEqual(calls, [])
+
+    def test_scheduled_job_stays_disabled_in_preview_without_enable_flag(self):
+        calls = []
+        settings = {"VERCEL": "1", "VERCEL_ENV": "preview", "CRON_SECRET": "test-secret"}
+        with patch.dict(os.environ, settings, clear=True):
+            app, _ = application(results_job=lambda: calls.append(True))
+            with TestClient(app, base_url=ORIGIN) as client:
+                response = client.post(self.JOB_PATH, headers={"Authorization": "Bearer test-secret"})
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()["error"]["code"], "disabled")
+        self.assertEqual(calls, [])
+
+    def test_authenticated_enabled_schedule_executes_worker_once(self):
+        calls = []
+        expected = {"state": "published", "requests_reserved": 3}
+        def worker():
+            calls.append(True)
+            return expected
+        settings = {"VERCEL": "1", "VERCEL_ENV": "production", "CRON_SECRET": "test-secret",
+                    "COURTIQ_ENABLE_RESULTS_JOB": "1"}
+        with patch.dict(os.environ, settings, clear=True):
+            app, _ = application(results_job=worker)
+            with TestClient(app, base_url=ORIGIN) as client:
+                response = client.post(self.JOB_PATH, headers={"Authorization": "Bearer test-secret"})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json(), expected)
+        self.assertEqual(calls, [True])
+
+    def test_vercel_system_domains_are_allowed_exactly_without_wildcards(self):
+        domains = ["courtiq-abc123.vercel.app", "courtiq-git-main-team.vercel.app", "courtiq.vercel.app"]
+        settings = dict(zip(("VERCEL_URL", "VERCEL_BRANCH_URL", "VERCEL_PROJECT_PRODUCTION_URL"), domains))
+        settings["VERCEL"] = "1"
+        with patch.dict(os.environ, settings, clear=True):
+            app, _ = application()
+            with TestClient(app, base_url=ORIGIN) as client:
+                for domain in domains:
+                    origin = "https://" + domain
+                    response = client.post(origin + "/api/predict", json=PAYLOAD, headers={"Origin": origin})
+                    self.assertEqual(response.status_code, 200, domain)
+                for domain in (domains[0] + ".evil.example", "other-team.vercel.app"):
+                    response = client.post("https://" + domain + "/api/predict", json=PAYLOAD,
+                                           headers={"Origin": "https://" + domains[0],
+                                                    "X-Forwarded-Host": domains[0]})
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(response.json()["error"]["code"], "invalid_host")
+                response = client.post("https://" + domains[0] + "/api/predict", json=PAYLOAD,
+                                       headers={"Origin": "http://" + domains[0]})
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json()["error"]["code"], "invalid_origin")
+
+    def test_vercel_domains_are_not_trusted_outside_vercel(self):
+        with patch.dict(os.environ, {"VERCEL_URL": "courtiq.vercel.app"}, clear=True):
+            app, _ = application()
+            with TestClient(app, base_url=ORIGIN) as client:
+                response = client.get("https://courtiq.vercel.app/healthz")
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json()["error"]["code"], "invalid_host")
+
+    def test_snapshot_refresh_precedes_cached_prediction_lookup(self):
+        service = SnapshotService()
+        app, _ = application(service, background_refresh=False)
+        with TestClient(app, base_url=ORIGIN) as client:
+            service.results_feed.events.clear()
+            initial = client.post("/api/predict", json=PAYLOAD).json()
+            repeated = client.post("/api/predict", json=PAYLOAD).json()
+            service.results_feed.published_revision = 2
+            refreshed = client.post("/api/predict", json=PAYLOAD).json()
+        self.assertEqual([initial["cached"], repeated["cached"], refreshed["cached"]], [False, True, False])
+        self.assertEqual([initial["revision"], repeated["revision"], refreshed["revision"]], [1, 1, 2])
+        self.assertEqual(service.results_feed.events,
+                         [("refresh",1),("predict",1),("refresh",1),("predict",1),("refresh",2),("predict",2)])
+
+    def test_snapshot_refresh_precedes_stream_compare_and_status(self):
+        service = SnapshotService()
+        app, _ = application(service, background_refresh=False)
+        with TestClient(app, base_url=ORIGIN) as client:
+            service.results_feed.events.clear()
+            service.results_feed.published_revision = 2
+            stream = client.post("/api/predict/stream", json=PAYLOAD)
+            events = [json.loads(line) for line in stream.text.splitlines()]
+            self.assertEqual(events[-1]["data"]["revision"], 2)
+            service.results_feed.published_revision = 3
+            self.assertEqual(client.get("/api/compare", params=PAYLOAD).json()["revision"], 3)
+            service.results_feed.published_revision = 4
+            self.assertEqual(client.get("/api/results/status").json()["revision"], 4)
+        self.assertEqual(service.results_feed.events,
+                         [("refresh",2),("predict",2),("refresh",3),("compare",3),("refresh",4)])
+
+    def test_read_only_snapshot_never_starts_a_periodic_background_reader(self):
+        service = SnapshotService()
+        app, _ = application(service, background_refresh=True, refresh_seconds=0.01)
+        with TestClient(app, base_url=ORIGIN):
+            self.assertEqual(service.results_feed.refreshes, 1)
+            self.assertFalse(service.results_feed.refreshed_twice.wait(timeout=0.08))
+        self.assertEqual(service.results_feed.refreshes, 1)
+        self.assertTrue(service.results_feed.closed)
+
+    def test_vercel_disables_periodic_background_refresh_by_default(self):
+        service = Service(configured=True)
+        with patch.dict(os.environ, {"VERCEL":"1"}, clear=True):
+            app, _ = application(service, refresh_seconds=0.01)
+            with TestClient(app, base_url=ORIGIN):
+                self.assertEqual(service.results_feed.refreshes, 1)
+                self.assertFalse(service.results_feed.refreshed_twice.wait(timeout=0.08))
+        self.assertEqual(service.results_feed.refreshes, 1)
+        self.assertTrue(service.results_feed.closed)
 
 
 class AdapterTests(unittest.TestCase):
