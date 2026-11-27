@@ -1,0 +1,2 @@
+# Install requirements-model.txt from your model export alongside these dependencies.
+-r requirements/runtime.txt

@@ -206,3 +206,16 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 models/*.pkl
+
+# CourtIQ local artifacts and deployment credentials
+.DS_Store
+.env.*
+!.env.example
+.vercel/
+models/
+requirements-model.txt
+data/external/
+catboost_info/
+*.zip
+*.tar
+*.tar.gz
