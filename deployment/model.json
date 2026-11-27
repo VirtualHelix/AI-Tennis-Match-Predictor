@@ -1,0 +1,9 @@
+{
+  "archive_sha256": "1056354c050c102e3b5aaab77b355e9386e580445a9f3ee6abe72f811b33fda1",
+  "archive_bytes": 63932822,
+  "model_sha256": "1e146d7640e0d7bbc7dfc42c50a4c402c65d6549484f10d334d5aee238553dc6",
+  "source_sha256": "589fcf1b9426843bcd6995f390aa10bebd9ff169a635046d6eb91024247ccda5",
+  "calibration_sha256": "19ed4f27c3a3ae044258c502383444a6cd61c311c8eba7ef7064428ea3467080",
+  "validation_year": 2025,
+  "model_mode": "evaluated"
+}

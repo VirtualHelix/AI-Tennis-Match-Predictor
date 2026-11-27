@@ -1,2 +1,2 @@
-# Install requirements-model.txt from your model export alongside these dependencies.
--r requirements/runtime.txt
+# Fully pinned Python 3.12 web and evaluated-model dependencies.
+-r requirements/production.txt

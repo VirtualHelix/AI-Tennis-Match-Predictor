@@ -1,0 +1,12 @@
+.git
+.venv*
+.env*
+__pycache__
+**/__pycache__
+*.zip
+data
+models
+model_verification
+tests
+experiments
+docs

@@ -9,6 +9,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 import json
+import hmac
 import logging
 import os
 from pathlib import Path
@@ -121,9 +122,14 @@ def hosted_html(html):
         "Interface preview · run locally to use your trained model": "Prediction service unavailable",
         "All three views are ready to explore; Model Report includes your reported validation results.":
             "Please retry once the prediction service is available.",
+        "Set SPORTSTATS_KEY on the local server to connect updated match results.":
+            "Loading published match results…",
     }
     for old, new in replacements.items():
         html = html.replace(old, new)
+    if os.environ.get("COURTIQ_RESULTS_SNAPSHOT_URL"):
+        html = html.replace("status: {configured: false, state: 'disabled'}",
+                            "status: {configured: false, state: 'disabled', read_only: true}")
     return html
 
 
@@ -168,7 +174,8 @@ async def json_payload(request):
 
 
 def create_app(service_factory=None, *, html=None, api_error_type=None,
-               public_origin=None, port=None, max_inflight=4, refresh_seconds=REFRESH_SECONDS):
+               public_origin=None, port=None, max_inflight=4, refresh_seconds=REFRESH_SECONDS,
+               background_refresh=None, results_job=None):
     """Factory keeps tests independent of model files and public provider calls."""
     port = int(port if port is not None else os.environ.get("PORT", "8000"))
     if not 1 <= port <= 65535 or not 1 <= max_inflight <= 32 or refresh_seconds <= 0:
@@ -178,6 +185,14 @@ def create_app(service_factory=None, *, html=None, api_error_type=None,
     origins = {"http://127.0.0.1:" + str(port), "http://localhost:" + str(port)}
     if configured:
         origins.add(canonical_origin(configured))
+    # These are deployment configuration, never caller-controlled headers.
+    if os.environ.get("VERCEL") == "1":
+        for name in ("VERCEL_URL", "VERCEL_BRANCH_URL", "VERCEL_PROJECT_PRODUCTION_URL"):
+            hostname = os.environ.get(name, "")
+            if hostname:
+                origins.add(canonical_origin("https://" + hostname))
+    if background_refresh is None:
+        background_refresh = os.environ.get("VERCEL") != "1"
 
     @asynccontextmanager
     async def lifespan(app):
@@ -196,9 +211,17 @@ def create_app(service_factory=None, *, html=None, api_error_type=None,
                 app.state.api_error_type = runtime.APIError
                 app.state.html = hosted_html(runtime.HTML_TEMPLATE)
                 root = Path(os.environ.get("COURTIQ_ROOT", Path(__file__).resolve().parents[1]))
+                results_provider = None
+                snapshot_url = os.environ.get("COURTIQ_RESULTS_SNAPSHOT_URL")
+                if snapshot_url:
+                    from courtiq.hosted_results import HostedResults
+                    from courtiq.results_job import fetch_published_snapshot
+                    results_provider = HostedResults(
+                        snapshot_url, authorization_token=os.environ.get("BLOB_READ_WRITE_TOKEN"),
+                        fetcher=fetch_published_snapshot)
                 factory = lambda: runtime.CourtIQService(
                     root, model_path=os.environ.get("COURTIQ_MODEL_PATH"),
-                    source_path=os.environ.get("COURTIQ_MODEL_CODE"))
+                    source_path=os.environ.get("COURTIQ_MODEL_CODE"), results_provider=results_provider)
             app.state.service = await run_in_threadpool(factory)
             if not app.state.service.status().get("ready"):
                 LOGGER.error("CourtIQ model could not load; readiness remains unavailable.")
@@ -214,7 +237,8 @@ def create_app(service_factory=None, *, html=None, api_error_type=None,
                                 await run_in_threadpool(app.state.service.results_feed.refresh)
                             except Exception:
                                 LOGGER.exception("Results refresh failed; keeping recorded history.")
-                periodic = asyncio.create_task(refresh_loop())
+                if background_refresh and not app.state.service.results_status().get("read_only"):
+                    periodic = asyncio.create_task(refresh_loop())
         except Exception:
             LOGGER.exception("CourtIQ startup did not complete; readiness remains unavailable.")
         try:
@@ -265,6 +289,16 @@ def create_app(service_factory=None, *, html=None, api_error_type=None,
         future.add_done_callback(lambda completed: app.state.gate.release())
         return future
 
+    def refresh_published(service):
+        if service.results_status().get("read_only"):
+            invoke(service.results_feed.refresh)
+
+    def infer(service, method, payload, **kwargs):
+        # Refresh before the service reads its cache revision. The provider's
+        # TTL coalesces concurrent readers; no SportStats calls happen here.
+        refresh_published(service)
+        return invoke(method, payload, **kwargs)
+
     @app.exception_handler(PublicError)
     async def public_exception(request, error):
         return error_response(error)
@@ -314,12 +348,29 @@ def create_app(service_factory=None, *, html=None, api_error_type=None,
 
     @app.get("/api/results/status")
     async def results_status():
-        return await run_in_threadpool(invoke, ready_service().results_status)
+        service = ready_service()
+        await run_in_threadpool(refresh_published, service)
+        return await run_in_threadpool(invoke, service.results_status)
 
     @app.post("/api/results/sync")
     async def results_sync(request: Request):
         payload = await json_payload(request)
         return await run_in_threadpool(invoke, ready_service().sync_results, payload)
+
+    @app.post("/api/internal/refresh-results")
+    async def scheduled_results(request: Request):
+        secret = os.environ.get("CRON_SECRET", "")
+        supplied = request.headers.get("authorization", "")
+        if not secret or not hmac.compare_digest(supplied.encode("utf-8"),
+                                                ("Bearer " + secret).encode("utf-8")):
+            raise PublicError("Unauthorized.", "unauthorized", 401)
+        if os.environ.get("COURTIQ_ENABLE_RESULTS_JOB") != "1":
+            raise PublicError("Scheduled updates are disabled for this environment.", "disabled", 409)
+        worker = results_job
+        if worker is None:
+            from courtiq.results_job import run_results_job
+            worker = run_results_job
+        return await run_in_threadpool(invoke, worker)
 
     @app.get("/api/compare")
     async def compare(request: Request):
@@ -332,13 +383,13 @@ def create_app(service_factory=None, *, html=None, api_error_type=None,
             if payload["best_of"] not in ("3", "5"):
                 raise PublicError("Match format must be best of 3 or best of 5.")
             payload["best_of"] = int(payload["best_of"])
-        return await asyncio.shield(submit_inference(lambda: invoke(service.compare, payload)))
+        return await asyncio.shield(submit_inference(lambda: infer(service, service.compare, payload)))
 
     @app.post("/api/predict")
     async def predict(request: Request):
         payload = await json_payload(request)
         service = ready_service()
-        return await asyncio.shield(submit_inference(lambda: invoke(service.predict, payload)))
+        return await asyncio.shield(submit_inference(lambda: infer(service, service.predict, payload)))
 
     @app.post("/api/predict/stream")
     async def stream_predict(request: Request):
@@ -361,7 +412,7 @@ def create_app(service_factory=None, *, html=None, api_error_type=None,
             try:
                 if disconnected.is_set():
                     return
-                result = invoke(service.predict, payload, progress=emit)
+                result = infer(service, service.predict, payload, progress=emit)
                 emit({"type": "result", "data": result})
             except StreamDisconnected:
                 pass
