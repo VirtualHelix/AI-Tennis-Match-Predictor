@@ -1,5 +1,9 @@
 # Deploy CourtIQ to Vercel
 
+**Live site:** [courtiq-virtualhelix.vercel.app](https://courtiq-virtualhelix.vercel.app/)
+
+The existing `courtiq` project is connected to [VirtualHelix/AI-Tennis-Match-Predictor](https://github.com/VirtualHelix/AI-Tennis-Match-Predictor), with `main` as its production branch. Updates to `main` trigger production deployments automatically. The setup below documents how to reproduce and maintain this deployment.
+
 CourtIQ deploys as a Python 3.12 FastAPI application using the root [app.py](../app.py). The browser, API, and saved predictor share one application origin. The model is supplied privately during the build; a separate scheduled request updates descriptive match results.
 
 The deployment configuration is [vercel.json](../vercel.json). It selects the FastAPI framework, runs `python scripts/build_vercel.py`, includes the generated serving artifact, and schedules a results refresh every six hours. No Node frontend build is required.
