@@ -2,6 +2,10 @@
 
 **Tennis match predictions, with the evidence behind every estimate.**
 
+[**Open the live app →**](https://courtiq-virtualhelix.vercel.app/) · [Deployment guide](docs/deployment.md)
+
+[![CourtIQ tests](https://github.com/VirtualHelix/AI-Tennis-Match-Predictor/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/VirtualHelix/AI-Tennis-Match-Predictor/actions/workflows/tests.yml)
+
 CourtIQ turns a tennis research model into an interactive web application. Choose two players and a hard, clay, or grass court to explore their estimated win probabilities, historical strengths, head-to-head record, and recent results. Built by Raghav, the project connects chronological machine learning, a Python API, a responsive interface, and a results pipeline with durable state.
 
 The released artifact supports **1,537 players** and contains model history through **May 25, 2026**. Updated match results arrive separately through SportStatsAPI. The interface identifies both dates: refreshing displayed results does **not** retrain the predictor or update its feature history.
@@ -47,6 +51,8 @@ A build verifies private artifact hashes, frozen source, and dependency versions
 
 Hosted results use a scheduled job and a private Blob object holding pagination checkpoints, request reservations, a lease, and a published snapshot. Conditional writes prevent overlapping workers from overwriting newer state. Visitors read that snapshot rather than spending a tennis-provider request per page load.
 
+Production runs on Vercel, with results refreshes scheduled every six hours. The GitHub repository is connected to Vercel, so updates to `main` automatically build and deploy the application.
+
 ## Run locally
 
 Use **Python 3.12**:
@@ -83,6 +89,6 @@ python -m pip install -r requirements/dev.txt
 python -m unittest discover -s tests -v
 ```
 
-[GitHub Actions](.github/workflows/tests.yml) runs the Python 3.12 suite. Synthetic fixtures test software behavior and are never displayed as tennis evidence. Original `src/` experiments remain; the web app uses `courtiq/`.
+[GitHub Actions](https://github.com/VirtualHelix/AI-Tennis-Match-Predictor/actions/workflows/tests.yml) runs **169 software tests** on Python 3.12, covering API behavior, score normalization, artifact integrity, model compaction, and durable results updates. Synthetic fixtures test software behavior and are never displayed as tennis evidence. Original `src/` experiments remain; the web app uses `courtiq/`.
 
 See the [deployment guide](docs/deployment.md) for Vercel, private artifacts, scheduled updates, and operating limits. Historical data comes from [Jeff Sackmann's ATP dataset](https://github.com/JeffSackmann/tennis_atp) and its [update fork](https://github.com/Kadantte/tennis_atp); updated records use [SportStatsAPI](https://sportstatsapi.com/docs/api/tennis-matches/). [Photo attributions](courtiq/assets/players/attribution.json) preserve authors and licenses. [Tennis facts](courtiq/assets/tennis_facts.json) retain source links.
